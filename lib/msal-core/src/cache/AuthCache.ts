@@ -7,6 +7,7 @@ import { Constants, PersistentCacheKeys, TemporaryCacheKeys, RequestStatus } fro
 import { AccessTokenCacheItem } from "./AccessTokenCacheItem";
 import { CacheLocation } from "../Configuration";
 import { BrowserStorage } from "./BrowserStorage";
+import { ClientAuthError } from "../error/ClientAuthError";
 
 /**
  * @hidden
@@ -64,10 +65,11 @@ export class AuthCache extends BrowserStorage {// Singleton
      */
     private generateCacheKey(key: string, addInstanceId: boolean): string {
         try {
+            // Defined schemas do not need the key appended
             JSON.parse(key);
             return key;
         } catch (e) {
-            if (key.startsWith(`${Constants.cachePrefix}`) || key.startsWith(PersistentCacheKeys.ADAL_ID_TOKEN)) {
+            if (key.indexOf(`${Constants.cachePrefix}`) === 0 || key.indexOf(PersistentCacheKeys.ADAL_ID_TOKEN) === 0) {
                 return key;
             }
             return addInstanceId ? `${Constants.cachePrefix}.${this.clientId}.${key}` : `${Constants.cachePrefix}.${key}`;
@@ -151,11 +153,17 @@ export class AuthCache extends BrowserStorage {// Singleton
      */
     getAllAccessTokens(clientId: string, homeAccountIdentifier: string): Array<AccessTokenCacheItem> {
         const results = Object.keys(window[this.cacheLocation]).reduce((tokens, key) => {
-            if ( window[this.cacheLocation].hasOwnProperty(key) && key.match(clientId) && key.match(homeAccountIdentifier)) {
+            const keyMatches = key.match(clientId) && key.match(homeAccountIdentifier) && key.match(Constants.scopes);
+            if ( keyMatches ) {
                 const value = this.getItem(key);
                 if (value) {
-                    const newAccessTokenCacheItem = new AccessTokenCacheItem(JSON.parse(key), JSON.parse(value));
-                    return tokens.concat([ newAccessTokenCacheItem ]);
+                    try {
+                        const parseAtKey = JSON.parse(key);
+                        const newAccessTokenCacheItem = new AccessTokenCacheItem(parseAtKey, JSON.parse(value));
+                        return tokens.concat([ newAccessTokenCacheItem ]);
+                    } catch (e) {
+                        throw ClientAuthError.createCacheParseError(key);
+                    }
                 }
             }
 
